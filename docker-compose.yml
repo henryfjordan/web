@@ -1,0 +1,125 @@
+version: '3'
+
+networks:
+  default:
+    driver: bridge
+  gitea:
+    driver: bridge
+  nextcloud:
+    driver: bridge
+  coffee:
+    driver: bridge
+  vscode:
+    driver: bridge
+
+volumes:
+  gitea-db-data:
+    driver: local
+  gitea-data:
+    driver: local
+  nextcloud-db:
+    driver: local
+  nextcloud:
+    driver: local
+
+services:
+
+  nginx-proxy:
+    image: nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "./nginx/vhost.d:/etc/nginx/vhost.d"
+      - "./nginx/html:/etc/nginx/html"
+      - "./nginx/conf/nginx.conf:/etc/nginx/nginx.conf"
+      - "/etc/letsencrypt/live/henryfjordan.com/fullchain.pem:/etc/nginx/certs/default.crt"
+      - "/etc/letsencrypt/live/henryfjordan.com/privkey.pem:/etc/nginx/certs/default.key"
+      - "./nginx/certs/dhparam.pem:/etc/nginx/certs/dhparam.pem"
+    networks:
+      - default
+      - gitea
+      - nextcloud
+      - coffee
+      - vscode
+
+  gitea-postgres:
+    image: postgres:9.5
+    restart: always
+    environment:
+      - "POSTGRES_USER=gitea"
+      - "POSTGRES_PASSWORD=gitea"
+      - "POSTGRES_DB=gitea"
+    volumes:
+      - "gitea-db-data:/var/lib/postgresql/data"
+    networks:
+      - gitea
+
+  gitea:
+    image: gitea/gitea:latest
+    restart: always
+    volumes:
+      - gitea-data:/data
+    expose:
+      - 3000
+    ports:
+      - "22:22"
+    networks:
+      - gitea
+    environment:
+      - DISABLE_REGISTRATION=true
+    depends_on:
+      - gitea-postgres
+      - nginx-proxy
+
+  nextcloud-db:
+    image: postgres:10.5
+    restart: always
+    volumes:
+      - nextcloud-db:/var/lib/postgresql/data
+    environment:
+      - "POSTGRES_USER=nextcloud"
+      - "POSTGRES_PASSWORD=nextcloud"
+      - "POSTGRES_DB=nextcloud"
+    networks:
+      - nextcloud
+
+  nextcloud:
+    image: nextcloud
+    expose:
+      - 8080
+    ports:
+      - "8080:80"
+    volumes:
+      - nextcloud:/var/www/html
+      - ./apache/apache2.conf:/etc/apache2/apache2.conf
+    restart: always
+    networks:
+      - nextcloud
+    depends_on:
+      - nextcloud-db
+      - nginx-proxy
+
+  coffee:
+    build: ./coffee
+    expose:
+      - 5000
+    restart: always
+    networks:
+      - coffee
+    depends_on:
+      - nginx-proxy
+
+  vscode:
+    image: codercom/code-server
+    entrypoint: sh -c "mkdir -p /root/.local/share/code-server/Backups/ && touch /root/.local/share/code-server/Backups/workspaces.json && code-server --allow-http /root/project"
+    expose:
+      - 8443
+    volumes:
+      - /home/henry/development:/root/project
+    restart: always
+    networks:
+      - vscode
+    depends_on:
+      - nginx-proxy
